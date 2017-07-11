@@ -4,5 +4,5 @@ clean:
 	mkdir -p build
 
 prompt: clean
-	${CC} ${CFLAGS} src/prompt.c src/mpc.c -o build/$@
+	${CC} ${CFLAGS} src/prompt.c src/mpc.c -o build/$@ -g
 
