@@ -29,7 +29,6 @@ void add_history(char* unusued) {}
 #define LASSERT(args, cond, err) \
     if (!(cond)) { lval_del(args); return lval_err(err); }
 
-
 // Enumeration of possible lval types
 enum { LVAL_ERR, LVAL_NUM, LVAL_SYM, LVAL_SEXPR, LVAL_QEXPR };
 
@@ -47,9 +46,78 @@ typedef struct lval {
     struct lval** cell;
 } lval;
 
-void lval_print(lval* v); 
+lval* lval_num(long x);
+lval* lval_err(char* m);
+lval* lval_sym(char* s);
+lval* lval_sexpr(void);
+lval* lval_qexpr(void);
+void lval_del(lval* v);
+lval* lval_pop(lval* v, int i);
+lval* lval_take(lval* v, int i);
+
+lval* lval_read(mpc_ast_t* t);
+lval* lval_read_num(mpc_ast_t* t);
+lval* lval_add(lval* v, lval* x);
+
 void lval_println(lval* v);
+void lval_print(lval* v);
+void lval_expr_print(lval* v, char open, char close);
+
+lval* lval_eval_sexpr(lval* v);
 lval* lval_eval(lval* v);
+
+lval* builtin_op(lval* a, char* op);
+lval* builtin_head(lval* a);
+lval* builtin_tail(lval* a);
+lval* builtin_list(lval* a);
+lval* builtin_eval(lval* a);
+
+int main(int argc, char** argv) {
+    // Create parsers
+    mpc_parser_t* Number = mpc_new("number");
+    mpc_parser_t* Symbol = mpc_new("symbol");
+    mpc_parser_t* Sexpr = mpc_new("sexpr");
+    mpc_parser_t* Qexpr = mpc_new("qexpr");
+    mpc_parser_t* Expr = mpc_new("expr");
+    mpc_parser_t* Lispy = mpc_new("lispy");
+
+    // Define parsers with the following language
+    mpca_lang(MPCA_LANG_DEFAULT,
+        " \
+            number  : /-?[0-9]+/ ;                                  \
+            symbol  : \"list\" | \"head\" | \"tail\" | \"join\"     \
+                    | \"eval\" | '+' | '-' | '*' | '/' ;            \
+            sexpr   : '(' <expr>* ')' ;                             \
+            qexpr   : '{' <expr>* '}' ;                             \
+            expr    : <number> | <symbol> | <sexpr> | <qexpr> ;     \
+            lispy   : /^/ <expr>* /$/ ;                             \
+        ",
+        Number, Symbol, Sexpr, Qexpr, Expr, Lispy);
+
+    puts("Lispy version 0.0.1");
+    puts("Press ctrl+c to exit");
+
+    while (1) {
+        char* input = readline("lispy> ");
+        add_history(input);
+
+        // Attempt to parse user input
+        mpc_result_t r;
+        if (mpc_parse("<stdin>", input, Lispy, &r)) {
+            lval* x = lval_eval(lval_read(r.output));
+            lval_println(x);
+            lval_del(x);
+            mpc_ast_delete(r.output);
+        } else {
+            mpc_err_print(r.error);
+            mpc_err_delete(r.error);
+        }
+        free(input);
+    }
+    mpc_cleanup(5, Number, Symbol, Sexpr, Qexpr, Expr, Lispy);
+    return 0;
+}
+
 
 lval* lval_num(long x) {
     lval* v = malloc(sizeof(lval));
@@ -109,25 +177,29 @@ void lval_del(lval* v) {
 }
 
 /*
- * Create an LVAL number node
- *
- * Converts the number string at t->contents to a c long.
- * If the number can't be parsed, returns an LVAL error node.
+ * Pop the LVAL at v's ith cell
  */
-lval* lval_read_num(mpc_ast_t* t) {
-    errno = 0;
-    long x = strtol(t->contents, NULL, 10);
-    return errno != ERANGE ? lval_num(x) : lval_err("invalid number");
+lval* lval_pop(lval* v, int i) {
+    // Find item at i
+    lval* x = v->cell[i];
+
+    // Shift memory after the item at i over the top
+    memmove(&v->cell[i], &v->cell[i+1], sizeof(lval*) * (v->count-i-1));
+
+    // Decrease count of items in the list
+    v->count--;
+
+    v->cell = realloc(v->cell, sizeof(lval*) * v->count);
+    return x;
 }
 
 /*
- * Add x to v's cell array.
+ * Return the LVAL at v's ith cell. Delete v.
  */
-lval* lval_add(lval* v, lval* x) {
-    v->count++;
-    v->cell = realloc(v->cell, sizeof(lval*) * v->count);
-    v->cell[v->count-1] = x;
-    return v;
+lval* lval_take(lval* v, int i) {
+    lval* x = lval_pop(v, i);
+    lval_del(v);
+    return x;
 }
 
 /*
@@ -156,18 +228,31 @@ lval* lval_read(mpc_ast_t* t) {
 }
 
 /*
- * Print an LVAL s expression
+ * Create an LVAL number node
+ *
+ * Converts the number string at t->contents to a c long.
+ * If the number can't be parsed, returns an LVAL error node.
  */
-void lval_expr_print(lval* v, char open, char close) {
-    putchar(open);
-    for (int i = 0; i < v->count; i++) {
-        lval_print(v->cell[i]);
-        if (i != (v->count - 1)) {
-            putchar(' ');
-        }
-    }
-    putchar(close);
+lval* lval_read_num(mpc_ast_t* t) {
+    errno = 0;
+    long x = strtol(t->contents, NULL, 10);
+    return errno != ERANGE ? lval_num(x) : lval_err("invalid number");
 }
+
+/*
+ * Add x to v's cell array.
+ */
+lval* lval_add(lval* v, lval* x) {
+    v->count++;
+    v->cell = realloc(v->cell, sizeof(lval*) * v->count);
+    v->cell[v->count-1] = x;
+    return v;
+}
+
+/*
+ * Print an LVAL and a newline
+ */
+void lval_println(lval* v) { lval_print(v); putchar('\n'); }
 
 /*
  * Print an LVAL
@@ -183,119 +268,31 @@ void lval_print(lval* v) {
 }
 
 /*
- * Print an LVAL and a newline
+ * Print an LVAL s expression
  */
-void lval_println(lval* v) { lval_print(v); putchar('\n'); }
-
-/*
- * Pop the LVAL at v's ith cell
- */
-lval* lval_pop(lval* v, int i) {
-    // Find item at i
-    lval* x = v->cell[i];
-
-    // Shift memory after the item at i over the top
-    memmove(&v->cell[i], &v->cell[i+1], sizeof(lval*) * (v->count-i-1));
-
-    // Decrease count of items in the list
-    v->count--;
-
-    v->cell = realloc(v->cell, sizeof(lval*) * v->count);
-    return x;
+void lval_expr_print(lval* v, char open, char close) {
+    putchar(open);
+    for (int i = 0; i < v->count; i++) {
+        lval_print(v->cell[i]);
+        if (i != (v->count - 1)) {
+            putchar(' ');
+        }
+    }
+    putchar(close);
 }
 
 /*
- * Return the LVAL at v's ith cell. Delete v.
+ * Recursively evaluate the LVAL AST
  */
-lval* lval_take(lval* v, int i) {
-    lval* x = lval_pop(v, i);
-    lval_del(v);
-    return x;
-}
-
-lval* builtin_op(lval* a, char* op) {
-    // Ensure all arguments are numbers
-    for (int i = 0; i < a->count; i++) {
-        if (a->cell[i]->type != LVAL_NUM) {
-            lval_del(a);
-            return lval_err("cannot operate on a non-number");
-        }
-    }
-
-    // If operation is subtract and there's one argument, negate it
-    lval* x = lval_pop(a, 0);
-    if ((strcmp(op, "-") == 0) && a->count == 0) {
-        x->num = -x->num;
-    }
-
-    // While there are remaining elements, pop them and combine with the first
-    // using the operation op
-    while (a->count > 0) {
-        lval* y = lval_pop(a, 0);
-
-        if (strcmp(op, "+") == 0) { x->num += y->num; }
-        if (strcmp(op, "-") == 0) { x->num -= y->num; }
-        if (strcmp(op, "*") == 0) { x->num *= y->num; }
-        if (strcmp(op, "/") == 0) {
-            if (y->num == 0) {
-                lval_del(x); lval_del(y);
-                x = lval_err("division by zero");
-                break;
-            }
-            x->num /= y->num; 
-        }
-        lval_del(y);
-    }
-    lval_del(a);
-    return x;
-}
-
-lval* builtin_head(lval* a) {
-    LASSERT(a, a->count == 1, "function 'head' passed too many arguments");
-    LASSERT(a, a->cell[0]->type == LVAL_QEXPR, 
-        "function 'head' passed incorrect type");
-    LASSERT(a, a->cell[0]->count != 0, "function 'head' passed {}");
-        
-    lval* v = lval_take(a, 0);
-    // Delete all elements which aren't the head and return
-    while (v->count > 1) { lval_del(lval_pop(v, 1)); }
-    return v;
-}
-
-lval* builtin_tail(lval* a) {
-    LASSERT(a, a->count == 1, "function 'tail' passed too many arguments");
-    LASSERT(a, a->cell[0]->type == LVAL_QEXPR, 
-        "function 'tail' passed incorrect type");
-    LASSERT(a, a->cell[0]->count != 0, "function 'tail' passed {}");
-
-    lval* v = lval_take(a, 0);
-    // Delete first element and return
-    lval_del(lval_pop(v, 0));
+lval* lval_eval(lval* v) {
+    // Evaluate s expressions
+    if (v->type == LVAL_SEXPR) { return lval_eval_sexpr(v); }
     return v;
 }
 
 /*
- * Convert an s-expression to a q-expression
+ * Recursively evaluate an LVAL s-expression and its children
  */
-lval* builtin_list(lval* a) {
-    a->type = LVAL_QEXPR;
-    return a;
-}
-
-/*
- * Evaluate a q-expression as an s-expression
- */
-lval* builtin_eval(lval* a) {
-    LASSERT(a, a->count == 1, "function 'eval' passed too many arguments");
-    LASSERT(a, a->cell[0]->type == LVAL_QEXPR, 
-        "function 'eval' passed incorrect type");
-    
-    lval* x = lval_take(a, 0);
-    x->type = LVAL_SEXPR;
-    return lval_eval(x);
-}
-
-
 lval* lval_eval_sexpr(lval* v) {
     // Evaluate children
     for (int i = 0; i < v->count; i++) {
@@ -326,54 +323,93 @@ lval* lval_eval_sexpr(lval* v) {
     return result;
 }
 
-lval* lval_eval(lval* v) {
-    // Evaluate s expressions
-    if (v->type == LVAL_SEXPR) { return lval_eval_sexpr(v); }
+/*
+ * Apply the builtin operation op to each of the nodes in a->cell
+ */
+lval* builtin_op(lval* a, char* op) {
+    // Ensure all arguments are numbers
+    for (int i = 0; i < a->count; i++) {
+        if (a->cell[i]->type != LVAL_NUM) {
+            lval_del(a);
+            return lval_err("cannot operate on a non-number");
+        }
+    }
+
+    // If operation is subtract and there's one argument, negate it
+    lval* x = lval_pop(a, 0);
+    if ((strcmp(op, "-") == 0) && a->count == 0) {
+        x->num = -x->num;
+    }
+
+    // While there are remaining elements, pop them and combine with the first
+    // using the operation op
+    while (a->count > 0) {
+        lval* y = lval_pop(a, 0);
+
+        if (strcmp(op, "+") == 0) { x->num += y->num; }
+        if (strcmp(op, "-") == 0) { x->num -= y->num; }
+        if (strcmp(op, "*") == 0) { x->num *= y->num; }
+        if (strcmp(op, "/") == 0) {
+            if (y->num == 0) {
+                lval_del(x); lval_del(y);
+                x = lval_err("division by zero");
+                break;
+            }
+            x->num /= y->num;
+        }
+        lval_del(y);
+    }
+    lval_del(a);
+    return x;
+}
+
+/*
+ * Return the first element of a q-expression
+ */
+lval* builtin_head(lval* a) {
+    LASSERT(a, a->count == 1, "function 'head' passed too many arguments");
+    LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
+        "function 'head' passed incorrect type");
+    LASSERT(a, a->cell[0]->count != 0, "function 'head' passed {}");
+
+    lval* v = lval_take(a, 0);
+    // Delete all elements which aren't the head and return
+    while (v->count > 1) { lval_del(lval_pop(v, 1)); }
     return v;
 }
 
-int main(int argc, char** argv) {
-    // Create parsers
-    mpc_parser_t* Number = mpc_new("number");
-    mpc_parser_t* Symbol = mpc_new("symbol");
-    mpc_parser_t* Sexpr = mpc_new("sexpr");
-    mpc_parser_t* Qexpr = mpc_new("qexpr");
-    mpc_parser_t* Expr = mpc_new("expr");
-    mpc_parser_t* Lispy = mpc_new("lispy");
+/*
+ * Return all but the first element of a q-expression
+ */
+lval* builtin_tail(lval* a) {
+    LASSERT(a, a->count == 1, "function 'tail' passed too many arguments");
+    LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
+        "function 'tail' passed incorrect type");
+    LASSERT(a, a->cell[0]->count != 0, "function 'tail' passed {}");
 
-    // Define parsers with the following language
-    mpca_lang(MPCA_LANG_DEFAULT,
-        " \
-            number  : /-?[0-9]+/ ;                                  \
-            symbol  : \"list\" | \"head\" | \"tail\" | \"join\"     \
-                    | \"eval\" | '+' | '-' | '*' | '/' ;            \
-            sexpr   : '(' <expr>* ')' ;                             \
-            qexpr   : '{' <expr>* '}' ;                             \
-            expr    : <number> | <symbol> | <sexpr> | <qexpr> ;     \
-            lispy   : /^/ <expr>* /$/ ;                             \
-        ",
-        Number, Symbol, Sexpr, Qexpr, Expr, Lispy);
+    lval* v = lval_take(a, 0);
+    // Delete first element and return
+    lval_del(lval_pop(v, 0));
+    return v;
+}
 
-    puts("Lispy version 0.0.1");
-    puts("Press ctrl+c to exit");
+/*
+ * Convert an s-expression to a q-expression
+ */
+lval* builtin_list(lval* a) {
+    a->type = LVAL_QEXPR;
+    return a;
+}
 
-    while (1) {
-        char* input = readline("lispy> ");
-        add_history(input);
+/*
+ * Evaluate a q-expression as an s-expression
+ */
+lval* builtin_eval(lval* a) {
+    LASSERT(a, a->count == 1, "function 'eval' passed too many arguments");
+    LASSERT(a, a->cell[0]->type == LVAL_QEXPR,
+        "function 'eval' passed incorrect type");
 
-        // Attempt to parse user input
-        mpc_result_t r;
-        if (mpc_parse("<stdin>", input, Lispy, &r)) {
-            lval* x = lval_eval(lval_read(r.output));
-            lval_println(x);
-            lval_del(x);
-            mpc_ast_delete(r.output);
-        } else {
-            mpc_err_print(r.error);
-            mpc_err_delete(r.error);
-        }
-        free(input);
-    }
-    mpc_cleanup(5, Number, Symbol, Sexpr, Qexpr, Expr, Lispy);
-    return 0;
+    lval* x = lval_take(a, 0);
+    x->type = LVAL_SEXPR;
+    return lval_eval(x);
 }
