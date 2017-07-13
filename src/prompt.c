@@ -54,6 +54,7 @@ lval* lval_qexpr(void);
 void lval_del(lval* v);
 lval* lval_pop(lval* v, int i);
 lval* lval_take(lval* v, int i);
+lval* lval_join(lval* x, lval* y);
 
 lval* lval_read(mpc_ast_t* t);
 lval* lval_read_num(mpc_ast_t* t);
@@ -66,11 +67,13 @@ void lval_expr_print(lval* v, char open, char close);
 lval* lval_eval_sexpr(lval* v);
 lval* lval_eval(lval* v);
 
+lval* builtin(lval* a, char* func);
 lval* builtin_op(lval* a, char* op);
 lval* builtin_head(lval* a);
 lval* builtin_tail(lval* a);
 lval* builtin_list(lval* a);
 lval* builtin_eval(lval* a);
+lval* builtin_join(lval* a);
 
 int main(int argc, char** argv) {
     // Create parsers
@@ -203,6 +206,18 @@ lval* lval_take(lval* v, int i) {
 }
 
 /*
+ * Add each cell in y to x, delete y
+ */
+lval* lval_join(lval*x, lval*y) {
+    while (y->count) {
+        x = lval_add(x, lval_pop(y, 0));
+    }
+
+    lval_del(y);
+    return x;
+}
+
+/*
  * Recursively read the AST into a tree of LVAL nodes.
  */
 lval* lval_read(mpc_ast_t* t) {
@@ -318,9 +333,20 @@ lval* lval_eval_sexpr(lval* v) {
         return lval_err("s-expression does not start with symbol");
     }
 
-    lval* result = builtin_op(v, f->sym);
+    lval* result = builtin(v, f->sym);
     lval_del(f);
     return result;
+}
+
+lval* builtin(lval* a, char* func) {
+    if (strcmp("list", func) == 0) { return builtin_list(a); }
+    if (strcmp("head", func) == 0) { return builtin_head(a); }
+    if (strcmp("tail", func) == 0) { return builtin_tail(a); }
+    if (strcmp("join", func) == 0) { return builtin_join(a); }
+    if (strcmp("eval", func) == 0) { return builtin_eval(a); }
+    if (strstr("+-*/", func)) { return builtin_op(a, func); }
+    lval_del(a);
+    return lval_err("unknown function");
 }
 
 /*
@@ -412,4 +438,22 @@ lval* builtin_eval(lval* a) {
     lval* x = lval_take(a, 0);
     x->type = LVAL_SEXPR;
     return lval_eval(x);
+}
+
+/*
+ * Join two or more q-expressions
+ */
+lval* builtin_join(lval* a) {
+    for (int i = 0; i < a->count; i++) {
+        LASSERT(a, a->cell[i]->type == LVAL_QEXPR, 
+            "function 'join' passed incorrect type");
+    }
+
+    lval* x = lval_pop(a, 0);
+
+    while (a->count) {
+        x = lval_join(x, lval_pop(a, 0));
+    }
+    lval_del(a);
+    return x;
 }
