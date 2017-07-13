@@ -95,6 +95,12 @@ void lval_del(lval* v) {
     free(v);
 }
 
+/*
+ * Create an LVAL number node
+ *
+ * Converts the number string at t->contents to a c long.
+ * If the number can't be parsed, returns an LVAL error node.
+ */
 lval* lval_read_num(mpc_ast_t* t) {
     errno = 0;
     long x = strtol(t->contents, NULL, 10);
