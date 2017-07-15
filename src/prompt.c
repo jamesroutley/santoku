@@ -103,6 +103,7 @@ lval* builtin_tail(lenv* e, lval* a);
 lval* builtin_list(lenv* e, lval* a);
 lval* builtin_eval(lenv* e, lval* a);
 lval* builtin_join(lenv* e, lval* a);
+lval* builtin_def(lenv* e, lval* a);
 
 int main(int argc, char** argv) {
     // Create parsers
@@ -471,18 +472,21 @@ lval* lval_eval_sexpr(lenv* e, lval* v) {
 }
 
 void lenv_add_builtins(lenv* e) {
-    /* List Functions */
+    // List Functions
     lenv_add_builtin(e, "list", builtin_list);
     lenv_add_builtin(e, "head", builtin_head);
     lenv_add_builtin(e, "tail", builtin_tail);
     lenv_add_builtin(e, "eval", builtin_eval);
     lenv_add_builtin(e, "join", builtin_join);
 
-    /* Mathematical Functions */
+    // Mathematical Functions
     lenv_add_builtin(e, "+", builtin_add);
     lenv_add_builtin(e, "-", builtin_sub);
     lenv_add_builtin(e, "*", builtin_mul);
     lenv_add_builtin(e, "/", builtin_div);
+
+    // Variable functions
+    lenv_add_builtin(e, "def", builtin_def);
 }
 
 void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
@@ -492,17 +496,6 @@ void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
     lval_del(k);
     lval_del(v);
 }
-
-/* lval* builtin(lval* a, char* func) { */
-/*     if (strcmp("list", func) == 0) { return builtin_list(a); } */
-/*     if (strcmp("head", func) == 0) { return builtin_head(a); } */
-/*     if (strcmp("tail", func) == 0) { return builtin_tail(a); } */
-/*     if (strcmp("join", func) == 0) { return builtin_join(a); } */
-/*     if (strcmp("eval", func) == 0) { return builtin_eval(a); } */
-//    if (strstr("+-*/", func)) { return builtin_op(a, func); }
-/*     lval_del(a); */
-/*     return lval_err("unknown function"); */
-/* } */
 
 lval* builtin_add(lenv* e, lval* a) {
     return builtin_op(e, a, "+");
@@ -627,4 +620,29 @@ lval* builtin_join(lenv* e, lval* a) {
     }
     lval_del(a);
     return x;
+}
+
+/*
+ * Bind a list of symbols in a q-expression to values
+ */
+lval* builtin_def(lenv* e, lval* a) {
+    LASSERT(a, a->cell[0]->type == LVAL_QEXPR, 
+        "function 'def' passed incorrect type");
+
+    lval* syms = a->cell[0];
+    
+    for (int i = 0; i < syms->count; i++) {
+        LASSERT(a, syms->cell[i]->type == LVAL_SYM,
+            "function 'def' cannot define a non-symbol");
+    }
+
+    LASSERT(a, syms->count == a->count-1, 
+        "function def cannot define an incorrect number of values to symbols");
+
+    for (int i = 0; i < syms->count; i++) {
+        lenv_put(e, syms->cell[i], a->cell[i+1]);
+    }
+
+    lval_del(a);
+    return lval_sexpr();
 }
