@@ -55,7 +55,8 @@ typedef struct lval lval;
 typedef struct lenv lenv;
 
 // Enumeration of possible lval types
-enum { LVAL_ERR, LVAL_NUM, LVAL_SYM, LVAL_FUN, LVAL_SEXPR, LVAL_QEXPR };
+enum { LVAL_ERR, LVAL_NUM, LVAL_SYM, LVAL_BOOL, LVAL_FUN, 
+    LVAL_SEXPR, LVAL_QEXPR };
 
 // Enumeration of possible lval errors
 enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM };
@@ -76,6 +77,7 @@ struct lval {
     long num;
     char* err;
     char* sym;
+    int bool;
 
     // Fields for funcion LVAL types
     lbuiltin builtin;
@@ -99,6 +101,7 @@ void lenv_put(lenv* e, lval* k, lval* v);
 lval* lval_num(long x);
 lval* lval_err(char* fmt, ...);
 lval* lval_sym(char* s);
+lval* lval_bool(char* b);
 lval* lval_fun(lbuiltin func);
 lval* lval_sexpr(void);
 lval* lval_qexpr(void);
@@ -143,6 +146,7 @@ int main(int argc, char** argv) {
     // Create parsers
     mpc_parser_t* Number = mpc_new("number");
     mpc_parser_t* Symbol = mpc_new("symbol");
+    mpc_parser_t* Bool = mpc_new("bool");
     mpc_parser_t* Sexpr = mpc_new("sexpr");
     mpc_parser_t* Qexpr = mpc_new("qexpr");
     mpc_parser_t* Expr = mpc_new("expr");
@@ -153,12 +157,14 @@ int main(int argc, char** argv) {
         " \
             number  : /-?[0-9]+/ ;                                  \
             symbol  : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&]+/ ;            \
+            bool    : /#[tf]/ ;                                     \
             sexpr   : '(' <expr>* ')' ;                             \
             qexpr   : '{' <expr>* '}' ;                             \
-            expr    : <number> | <symbol> | <sexpr> | <qexpr> ;     \
+            expr    : <number> | <symbol> | <bool> | <sexpr>        \
+                    | <qexpr> ;                                     \
             lispy   : /^/ <expr>* /$/ ;                             \
         ",
-        Number, Symbol, Sexpr, Qexpr, Expr, Lispy);
+        Number, Symbol, Bool, Sexpr, Qexpr, Expr, Lispy);
 
     puts("Lispy version 0.0.1");
     puts("Press ctrl+c to exit");
@@ -183,7 +189,7 @@ int main(int argc, char** argv) {
         }
         free(input);
     }
-    mpc_cleanup(5, Number, Symbol, Sexpr, Qexpr, Expr, Lispy);
+    mpc_cleanup(5, Number, Symbol, Bool, Sexpr, Qexpr, Expr, Lispy);
     return 0;
 }
 
@@ -193,6 +199,7 @@ char* ltype_name(int t) {
         case LVAL_NUM: return "Number";
         case LVAL_ERR: return "Error";
         case LVAL_SYM: return "Symbol";
+        case LVAL_BOOL: return "Boolean";
         case LVAL_SEXPR: return "S-Expression";
         case LVAL_QEXPR: return "Q-Expression";
         default: return "Unknown";
@@ -322,6 +329,17 @@ lval* lval_sym(char* s) {
     return v;
 }
 
+lval* lval_bool(char* b) {
+    lval* v = malloc(sizeof(lval));
+    v->type = LVAL_BOOL;
+    if (strcmp(b, "#f") == 0) {
+        v->bool = 0;
+    } else {
+        v->bool = 1;
+    }
+    return v;
+}
+
 lval* lval_fun(lbuiltin func) {
     lval* v = malloc(sizeof(lval));
     v->type = LVAL_FUN;
@@ -363,6 +381,7 @@ void lval_del(lval* v) {
         case LVAL_NUM: break;
         case LVAL_ERR: break;
         case LVAL_SYM: break;
+        case LVAL_BOOL: break;
         case LVAL_FUN:
            if (!v->builtin) {
                lenv_del(v->env);
@@ -427,6 +446,7 @@ lval* lval_copy(lval* v) {
 
     switch (v->type) {
         case LVAL_NUM: x->num = v->num; break;
+        case LVAL_BOOL: x->bool = v->bool; break;
         case LVAL_FUN: 
             if (v->builtin) {
                x->builtin = v->builtin; 
@@ -464,6 +484,7 @@ lval* lval_copy(lval* v) {
 lval* lval_read(mpc_ast_t* t) {
     if (strstr(t->tag, "number")) { return lval_read_num(t); }
     if (strstr(t->tag, "symbol")) { return lval_sym(t->contents); }
+    if (strstr(t->tag, "bool")) { return lval_bool(t->contents); }
 
     // If root ('>') or sexpr, create an empty list
     lval* x = NULL;
@@ -609,6 +630,12 @@ void lval_print(lval* v) {
         case LVAL_NUM: printf("%li", v->num); break;
         case LVAL_ERR: printf("Error: %s", v->err); break;
         case LVAL_SYM: printf("%s", v->sym); break;
+        case LVAL_BOOL:
+           if (v->bool) {
+               printf("#t"); break;
+           } else {
+               printf("#f"); break;
+           }
         case LVAL_FUN: 
             if (v->builtin) {
                 printf("<builtin>");
@@ -735,6 +762,18 @@ lval* builtin_div(lenv* e, lval* a) {
     return builtin_op(e, a, "/");
 }
 
+/* lval* builtin_eq(lenv* e, lval* a) { */
+/*     return builtin_op(e, a, "=="); */
+/* } */
+
+/* lval* builtin_gt(lenv* e, lval* a) { */
+/*     return builtin_op(e, a, ">"); */
+/* } */
+
+/* lval* builtin_lt(lenv* e, lval* a) { */
+/*     return builtin_op(e, a, "<"); */
+/* } */
+
 /*
  * Apply the builtin operation op to each of the nodes in a->cell
  */
@@ -769,11 +808,26 @@ lval* builtin_op(lenv* e, lval* a, char* op) {
             }
             x->num /= y->num;
         }
+        if (strcmp(op, "==") == 0) {  }
         lval_del(y);
     }
     lval_del(a);
     return x;
 }
+
+/* lval* builtin_comparison(lval* e, lval* a, char* cmp) { */
+/*     LASSERT_NUM(cmp, a, 2); */
+/*     for (int i = 0; i < a->count; i++) { */
+/*         LASSERT_TYPE(cmp, a, i, LVAL_NUM); */
+/*     } */
+
+/*     lval* x = lval_pop(a, 0); */
+/*     lval* y = lval_pop(a, 0); */
+
+/*     if (strcmp(cmp, "==") == 0) { x->num == y->num; } */
+/*     if (strcmp(cmp, "<") == 0) { x->num < y->num; } */
+/*     if (strcmp(cmp, ">") == 0) { x->num == y->num; } */
+/* } */
 
 /*
  * Return the first element of a q-expression
