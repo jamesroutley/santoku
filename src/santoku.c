@@ -40,7 +40,7 @@ void add_history(char* unusued) {}
 
 #define LASSERT_NUM(func, args, num) \
     LASSERT(args, args->count == num, \
-            "function '%s' passed incorrect number of argumented. Expected " \
+            "function '%s' passed incorrect number of arguments. Expected " \
             "%d, got %d", func, num, args->count)
 
 #define LASSERT_NOT_EMPTY(func, args, index) \
@@ -147,6 +147,7 @@ lval* builtin_def(lenv* e, lval* a);
 lval* builtin_put(lenv* e, lval* a);
 lval* builtin_var(lenv* e, lval* a, char* func);
 lval* builtin_lambda(lenv* e, lval* a);
+lval* builtin_if(lenv* e, lval*a);
 
 int main(int argc, char** argv) {
     // Create parsers
@@ -746,6 +747,9 @@ void lenv_add_builtins(lenv* e) {
     lenv_add_builtin(e, "<", builtin_lt);
     lenv_add_builtin(e, "<=", builtin_lte);
 
+    // Branching
+    lenv_add_builtin(e, "if", builtin_if);
+
     // Variable functions
     lenv_add_builtin(e, "def", builtin_def);
 
@@ -980,4 +984,35 @@ lval* builtin_lambda(lenv* e, lval* a) {
     lval_del(a);
 
     return lval_lambda(formals, body);
+}
+
+lval* builtin_if(lenv* e, lval*a) {
+    LASSERT(a, a->count == 2 || a->count == 3, "'if' statements require 2 or "
+        "3 arguments. Got %d", a->count);
+    LASSERT_TYPE("if", a, 0, LVAL_BOOL);
+    LASSERT_TYPE("if", a, 1, LVAL_QEXPR);
+    if (a->count == 3) {
+        LASSERT_TYPE("if", a, 2, LVAL_QEXPR);
+    }
+
+    lval* cond = lval_pop(a, 0);
+    lval* if_expr = lval_pop(a, 0);
+    lval* else_expr;
+    if (a->count == 1) {
+        else_expr = lval_pop(a, 0);
+    } else {
+        else_expr = lval_sexpr();
+    }
+
+    // Mark expressions as executable
+    if_expr->type=LVAL_SEXPR;
+    else_expr->type=LVAL_SEXPR;
+
+    lval_del(a);
+
+    if (cond->bool) {
+        return lval_eval(e, if_expr);
+    } else {
+        return lval_eval(e, else_expr);
+    }
 }
