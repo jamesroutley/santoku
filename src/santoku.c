@@ -130,8 +130,12 @@ lval* builtin(lval* a, char* func);
 lval* builtin_add(lenv* e, lval* a);
 lval* builtin_sub(lenv* e, lval* a);
 lval* builtin_mul(lenv* e, lval* a);
+lval* builtin_eq(lenv* e, lval* a);
+lval* builtin_gt(lenv* e, lval* a);
+lval* builtin_lt(lenv* e, lval* a);
 lval* builtin_div(lenv* e, lval* a);
 lval* builtin_op(lenv* e, lval* a, char* op);
+lval* builtin_comparison(lenv* e, lval* a, char* cmp);
 lval* builtin_head(lenv* e, lval* a);
 lval* builtin_tail(lenv* e, lval* a);
 lval* builtin_list(lenv* e, lval* a);
@@ -733,6 +737,11 @@ void lenv_add_builtins(lenv* e) {
     lenv_add_builtin(e, "*", builtin_mul);
     lenv_add_builtin(e, "/", builtin_div);
 
+    // Comarison functions
+    lenv_add_builtin(e, "==", builtin_eq);
+    lenv_add_builtin(e, ">", builtin_gt);
+    lenv_add_builtin(e, "<", builtin_lt);
+
     // Variable functions
     lenv_add_builtin(e, "def", builtin_def);
 
@@ -764,17 +773,17 @@ lval* builtin_div(lenv* e, lval* a) {
     return builtin_op(e, a, "/");
 }
 
-/* lval* builtin_eq(lenv* e, lval* a) { */
-/*     return builtin_op(e, a, "=="); */
-/* } */
+lval* builtin_eq(lenv* e, lval* a) {
+    return builtin_comparison(e, a, "==");
+}
 
-/* lval* builtin_gt(lenv* e, lval* a) { */
-/*     return builtin_op(e, a, ">"); */
-/* } */
+lval* builtin_gt(lenv* e, lval* a) {
+    return builtin_comparison(e, a, ">");
+}
 
-/* lval* builtin_lt(lenv* e, lval* a) { */
-/*     return builtin_op(e, a, "<"); */
-/* } */
+lval* builtin_lt(lenv* e, lval* a) {
+    return builtin_comparison(e, a, "<");
+}
 
 /*
  * Apply the builtin operation op to each of the nodes in a->cell
@@ -817,19 +826,20 @@ lval* builtin_op(lenv* e, lval* a, char* op) {
     return x;
 }
 
-/* lval* builtin_comparison(lval* e, lval* a, char* cmp) { */
-/*     LASSERT_NUM(cmp, a, 2); */
-/*     for (int i = 0; i < a->count; i++) { */
-/*         LASSERT_TYPE(cmp, a, i, LVAL_NUM); */
-/*     } */
+lval* builtin_comparison(lenv* e, lval* a, char* cmp) {
+    LASSERT_NUM(cmp, a, 2);
+    for (int i = 0; i < a->count; i++) {
+        LASSERT_TYPE(cmp, a, i, LVAL_NUM);
+    }
 
-/*     lval* x = lval_pop(a, 0); */
-/*     lval* y = lval_pop(a, 0); */
+    lval* x = lval_pop(a, 0);
+    lval* y = lval_pop(a, 0);
 
-/*     if (strcmp(cmp, "==") == 0) { x->num == y->num; } */
-/*     if (strcmp(cmp, "<") == 0) { x->num < y->num; } */
-/*     if (strcmp(cmp, ">") == 0) { x->num == y->num; } */
-/* } */
+    if (strcmp(cmp, "==") == 0) { return lval_bool(x->num == y->num); }
+    if (strcmp(cmp, "<") == 0) { return lval_bool(x->num < y->num); }
+    if (strcmp(cmp, ">") == 0) { return lval_bool(x->num > y->num); }
+    return lval_err("undefined comparison operator '%s'", cmp);
+}
 
 /*
  * Return the first element of a q-expression
