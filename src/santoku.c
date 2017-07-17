@@ -101,7 +101,7 @@ void lenv_put(lenv* e, lval* k, lval* v);
 lval* lval_num(long x);
 lval* lval_err(char* fmt, ...);
 lval* lval_sym(char* s);
-lval* lval_bool(char* b);
+lval* lval_bool(int b);
 lval* lval_fun(lbuiltin func);
 lval* lval_sexpr(void);
 lval* lval_qexpr(void);
@@ -329,14 +329,10 @@ lval* lval_sym(char* s) {
     return v;
 }
 
-lval* lval_bool(char* b) {
+lval* lval_bool(int b) {
     lval* v = malloc(sizeof(lval));
     v->type = LVAL_BOOL;
-    if (strcmp(b, "#f") == 0) {
-        v->bool = 0;
-    } else {
-        v->bool = 1;
-    }
+    v->bool = b;
     return v;
 }
 
@@ -484,7 +480,13 @@ lval* lval_copy(lval* v) {
 lval* lval_read(mpc_ast_t* t) {
     if (strstr(t->tag, "number")) { return lval_read_num(t); }
     if (strstr(t->tag, "symbol")) { return lval_sym(t->contents); }
-    if (strstr(t->tag, "bool")) { return lval_bool(t->contents); }
+    if (strstr(t->tag, "bool")) {
+        if (strcmp(t->contents, "#t") == 0) {
+            return lval_bool(1);
+        } else {
+            return lval_bool(0);
+        }
+    }
 
     // If root ('>') or sexpr, create an empty list
     lval* x = NULL;
