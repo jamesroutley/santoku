@@ -132,7 +132,9 @@ lval* builtin_sub(lenv* e, lval* a);
 lval* builtin_mul(lenv* e, lval* a);
 lval* builtin_eq(lenv* e, lval* a);
 lval* builtin_gt(lenv* e, lval* a);
+lval* builtin_gte(lenv* e, lval* a);
 lval* builtin_lt(lenv* e, lval* a);
+lval* builtin_lte(lenv* e, lval* a);
 lval* builtin_div(lenv* e, lval* a);
 lval* builtin_op(lenv* e, lval* a, char* op);
 lval* builtin_comparison(lenv* e, lval* a, char* cmp);
@@ -740,7 +742,9 @@ void lenv_add_builtins(lenv* e) {
     // Comarison functions
     lenv_add_builtin(e, "==", builtin_eq);
     lenv_add_builtin(e, ">", builtin_gt);
+    lenv_add_builtin(e, ">=", builtin_gte);
     lenv_add_builtin(e, "<", builtin_lt);
+    lenv_add_builtin(e, "<=", builtin_lte);
 
     // Variable functions
     lenv_add_builtin(e, "def", builtin_def);
@@ -781,8 +785,16 @@ lval* builtin_gt(lenv* e, lval* a) {
     return builtin_comparison(e, a, ">");
 }
 
+lval* builtin_gte(lenv* e, lval* a) {
+    return builtin_comparison(e, a, ">=");
+}
+
 lval* builtin_lt(lenv* e, lval* a) {
     return builtin_comparison(e, a, "<");
+}
+
+lval* builtin_lte(lenv* e, lval* a) {
+    return builtin_comparison(e, a, "<=");
 }
 
 /*
@@ -838,6 +850,8 @@ lval* builtin_comparison(lenv* e, lval* a, char* cmp) {
     if (strcmp(cmp, "==") == 0) { return lval_bool(x->num == y->num); }
     if (strcmp(cmp, "<") == 0) { return lval_bool(x->num < y->num); }
     if (strcmp(cmp, ">") == 0) { return lval_bool(x->num > y->num); }
+    if (strcmp(cmp, "<=") == 0) { return lval_bool(x->num <= y->num); }
+    if (strcmp(cmp, ">=") == 0) { return lval_bool(x->num >= y->num); }
     return lval_err("undefined comparison operator '%s'", cmp);
 }
 
